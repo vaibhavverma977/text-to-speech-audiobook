@@ -2,6 +2,16 @@
    Text-to-Speech Audiobook — app.js
    Vanilla JS only. Uses the browser Web Speech API.
    No network requests, no storage, no frameworks.
+
+   iOS Safari notes baked into this version:
+   - The very first speak() must be called synchronously from
+     the Play button's user gesture. No setTimeout, no queueing.
+   - speak() immediately after cancel() can silently fail on
+     iOS, so we avoid cancel() on a fresh start.
+   - We never mark "Speaking" just because speak() was called;
+     status only flips on the real utterance.onstart event.
+   - Chunks are played sequentially, driven by onend of the
+     previous chunk, not by pre-queueing them all at once.
    ========================================================= */
 
 (function () {
@@ -98,13 +108,13 @@
         if (label) return label + ' (' + code + ')';
       }
     } catch (err) {
-      /* ignore and fall through to the raw code */
+      /* fall through to raw code */
     }
     return code;
   }
 
   /* ---------------------------------------------------------
-     Status, error and warning UI
+     Status, error, warning UI
      --------------------------------------------------------- */
 
   function setStatus(next) {
@@ -147,7 +157,7 @@
   }
 
   /* ---------------------------------------------------------
-     Language detection and matching
+     Language detection & matching
      --------------------------------------------------------- */
 
   function detectLang(text) {
@@ -285,9 +295,8 @@
   }
 
   /* ---------------------------------------------------------
-     Text chunking
-     Long utterances can be cut off by some engines, so the
-     text is split into sentence-sized pieces and queued.
+     Text chunking (sentence-sized pieces so long text is
+     handled reliably across engines).
      --------------------------------------------------------- */
 
   function splitIntoChunks(text, maxLen) {
@@ -332,7 +341,86 @@
   }
 
   /* ---------------------------------------------------------
-     Playback
+     Sequential playback engine
+
+     speakChunk() speaks exactly one chunk. The next chunk is
+     started only from the previous utterance's onend, so we
+     never flood iOS with a queue of pre-built utterances.
+     --------------------------------------------------------- */
+
+  function speakChunk(index, ctx) {
+    if (ctx.session !== sessionId) return;
+
+    if (index >= ctx.chunks.length) {
+      setStatus('finished');
+      updateVoiceInfo();
+      return;
+    }
+
+    var u = new SpeechSynthesisUtterance(ctx.chunks[index]);
+
+    // Assign safely. voice in particular can throw for
+    // listed-but-unusable voices on some platforms.
+    u.lang = ctx.lang || 'en-US';
+    u.rate = ctx.rate;
+    u.pitch = 1;
+    u.volume = 1;
+
+    if (ctx.useVoice && ctx.voice) {
+      try {
+        u.voice = ctx.voice;
+      } catch (err) {
+        ctx.useVoice = false;
+      }
+    }
+
+    u.onstart = function () {
+      if (ctx.session !== sessionId) return;
+      setStatus('speaking');
+      clearError();
+      var voiceLabel = (ctx.useVoice && ctx.voice) ? ctx.voice.name : 'default';
+      el.voiceInfo.textContent =
+        'Speaking chunk ' + (index + 1) + '/' + ctx.chunks.length +
+        ' \u00B7 voice: ' + voiceLabel +
+        ' \u00B7 lang: ' + u.lang;
+    };
+
+    u.onend = function () {
+      if (ctx.session !== sessionId) return;
+      speakChunk(index + 1, ctx);
+    };
+
+    u.onerror = function (ev) {
+      if (ctx.session !== sessionId) return;
+
+      var code = (ev && ev.error) ? ev.error : 'unknown';
+
+      // Silent, expected interruptions — not real failures.
+      if (code === 'interrupted' || code === 'canceled') return;
+
+      // A listed voice can still be unusable. Retry the same
+      // chunk once without an explicit voice, relying on lang.
+      if (ctx.useVoice && (code === 'voice-unavailable' || code === 'language-unavailable')) {
+        ctx.useVoice = false;
+        speakChunk(index, ctx);
+        return;
+      }
+
+      var voiceName = ctx.voice ? ctx.voice.name : 'default';
+      showError(
+        'Speech error: "' + code + '" \u00B7 voice: ' + voiceName +
+        ' \u00B7 lang: ' + u.lang +
+        ' \u00B7 chunk ' + (index + 1) + '/' + ctx.chunks.length
+      );
+      setStatus('ready');
+      updateVoiceInfo();
+    };
+
+    synth.speak(u);
+  }
+
+  /* ---------------------------------------------------------
+     Playback controls
      --------------------------------------------------------- */
 
   function startSpeaking() {
@@ -356,76 +444,41 @@
     }
 
     var voice = getSelectedVoice();
-    var lang = voice ? voice.lang : langToCode(requestedLang());
+    var lang = (voice && voice.lang) ? voice.lang : langToCode(requestedLang());
     var rate = clampRate(el.rateRange.value);
 
+    // New session — any pending events from prior utterances
+    // will see a mismatched session and bail out.
     sessionId += 1;
     var mySession = sessionId;
 
     var wasActive = !!(synth.speaking || synth.pending || synth.paused);
 
-    if (wasActive) {
-      synth.cancel();
-      if (synth.paused && typeof synth.resume === 'function') {
-        synth.resume();
-      }
-    }
-
-    function queueSpeech() {
-      if (mySession !== sessionId) return;
-
-      chunks.forEach(function (chunk, index) {
-        var utterance = new SpeechSynthesisUtterance(chunk);
-
-        if (voice) utterance.voice = voice;
-        utterance.lang = lang || 'en-US';
-        utterance.rate = rate;
-        utterance.pitch = 1;
-        utterance.volume = 1;
-
-        utterance.onstart = function () {
-          if (mySession !== sessionId) return;
-          setStatus('speaking');
-        };
-
-        utterance.onend = function () {
-          if (mySession !== sessionId) return;
-          if (index === chunks.length - 1) {
-            setStatus('finished');
-          }
-        };
-
-        utterance.onerror = function (event) {
-          if (mySession !== sessionId) return;
-
-          var code = event && event.error ? event.error : 'unknown';
-
-          if (code === 'interrupted' || code === 'canceled') return;
-
-          if (code === 'not-allowed') {
-            showError('The browser blocked speech. Tap the Play button once more to allow audio playback.');
-          } else if (code === 'voice-unavailable') {
-            showError('That voice is not available on this device. Please choose another voice.');
-          } else {
-            showError('Speech could not be played (' + code + ').');
-          }
-
-          setStatus('ready');
-        };
-
-        synth.speak(utterance);
-      });
-
-      setStatus('speaking');
-    }
+    var ctx = {
+      chunks: chunks,
+      voice: voice,
+      lang: lang,
+      rate: rate,
+      useVoice: !!voice,
+      session: mySession
+    };
 
     if (wasActive) {
-      // Give the engine a moment after cancel(); some browsers ignore an
-      // immediate speak() that follows a cancel().
-      window.setTimeout(queueSpeech, 60);
-    } else {
-      queueSpeech();
+      // Something is already talking. Cancel it, then wait a
+      // moment before the new speak() — iOS Safari drops a
+      // speak() that immediately follows cancel().
+      try { synth.cancel(); } catch (err) { /* ignore */ }
+      window.setTimeout(function () {
+        if (ctx.session !== sessionId) return;
+        speakChunk(0, ctx);
+      }, 80);
+      return;
     }
+
+    // Fresh start: speak the first chunk synchronously, inside
+    // the user gesture. This is the case that matters most on
+    // iOS Safari, and it must not go through a timeout.
+    speakChunk(0, ctx);
   }
 
   function pauseSpeaking() {
@@ -439,14 +492,21 @@
 
     if (playState === 'paused') return;
 
-    synth.pause();
-    setStatus('paused');
+    try { synth.pause(); } catch (err) { /* ignore */ }
+
+    // Only reflect "Paused" if the engine actually paused.
+    if (synth.paused) {
+      setStatus('paused');
+      return;
+    }
 
     window.setTimeout(function () {
-      if (playState === 'paused' && synth.speaking && !synth.paused) {
+      if (synth.paused) {
+        setStatus('paused');
+      } else {
         showError('This browser did not pause the speech. Use Stop to end playback instead.');
       }
-    }, 300);
+    }, 60);
   }
 
   function resumeSpeaking() {
@@ -458,23 +518,29 @@
       return;
     }
 
-    synth.resume();
+    try { synth.resume(); } catch (err) { /* ignore */ }
     setStatus('speaking');
   }
 
   function stopSpeaking() {
     if (!hasSpeech) return;
 
+    // Invalidate the current session so any in-flight events
+    // from the old utterance cannot restart playback.
     sessionId += 1;
-    synth.cancel();
 
-    // Some engines stay stuck in a paused state after cancel().
-    if (typeof synth.resume === 'function' && synth.paused) {
-      synth.resume();
-    }
+    try {
+      synth.cancel();
+      // Some engines get stuck in a paused state after cancel().
+      // Only resume if it is actually paused — no needless calls.
+      if (synth.paused && typeof synth.resume === 'function') {
+        synth.resume();
+      }
+    } catch (err) { /* ignore */ }
 
     setStatus('ready');
     clearError();
+    updateVoiceInfo();
   }
 
   /* ---------------------------------------------------------
@@ -555,6 +621,7 @@
 
     /* ---- playback controls ---- */
     el.playBtn.addEventListener('click', function () {
+      // If we are truly paused, resume. Otherwise start fresh.
       if (playState === 'paused' && synth.paused) {
         resumeSpeaking();
         return;
@@ -577,9 +644,8 @@
 
     refreshVoices();
 
-    // Some browsers (notably iOS Safari) only expose the full voice list
-    // after a short delay or the first user interaction. Poll briefly and
-    // re-check on the first touch/click.
+    // iOS Safari exposes voices late, or only after the first
+    // user interaction. Poll briefly, then re-check on first tap.
     var tries = 0;
     var poll = window.setInterval(function () {
       tries += 1;
@@ -589,18 +655,3 @@
 
     function nudgeVoices() {
       document.removeEventListener('touchstart', nudgeVoices);
-      document.removeEventListener('click', nudgeVoices);
-      window.setTimeout(refreshVoices, 0);
-    }
-
-    document.addEventListener('touchstart', nudgeVoices, { passive: true });
-    document.addEventListener('click', nudgeVoices);
-
-    /* ---- cleanup ---- */
-    window.addEventListener('pagehide', function () {
-      if (hasSpeech) synth.cancel();
-    });
-  }
-
-  init();
-})();
