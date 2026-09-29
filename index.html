@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#f4f5f9" />
+<title>Text-to-Speech Audiobook</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="app">
+
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">&#9654;</span>
+      <h1>Text-to-Speech Audiobook</h1>
+    </div>
+    <p class="tagline">Paste English or Hindi text and listen with the voices already built into your device.</p>
+  </header>
+
+  <div id="unsupportedBanner" class="banner banner-error" role="alert" hidden>
+    This browser does not support the Web Speech API, so speech playback is unavailable here.
+    Try Safari on iPhone, or a recent version of Chrome, Edge, or Safari on desktop.
+  </div>
+
+  <main class="stack">
+
+    <!-- ============ A. TEXT INPUT ============ -->
+    <section class="card" aria-labelledby="textHeading">
+      <div class="card-head">
+        <h2 id="textHeading">Your text</h2>
+        <span id="charCount" class="pill" aria-live="polite">0 characters</span>
+      </div>
+
+      <label class="sr-only" for="textInput">Text to read aloud</label>
+      <textarea
+        id="textInput"
+        class="text-input"
+        rows="8"
+        spellcheck="false"
+        autocapitalize="sentences"
+        placeholder="Paste or type your text here. English and Hindi are both supported."></textarea>
+
+      <div class="button-row">
+        <button id="clearBtn" type="button" class="btn btn-ghost">Clear text</button>
+        <button id="sampleEnBtn" type="button" class="btn btn-ghost">Sample: English</button>
+        <button id="sampleHiBtn" type="button" class="btn btn-ghost">Sample: Hindi</button>
+      </div>
+    </section>
+
+    <!-- ============ B. LANGUAGE AND VOICE ============ -->
+    <section class="card" aria-labelledby="voiceHeading">
+      <div class="card-head">
+        <h2 id="voiceHeading">Language &amp; voice</h2>
+      </div>
+
+      <div class="field">
+        <label for="languageSelect">Language</label>
+        <select id="languageSelect">
+          <option value="auto">Auto (detect from text)</option>
+          <option value="en">English</option>
+          <option value="hi">Hindi</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="voiceSelect">Voice</label>
+        <select id="voiceSelect" aria-describedby="voiceInfo"></select>
+      </div>
+
+      <p id="voiceInfo" class="hint">Loading available voices&hellip;</p>
+      <p id="voiceWarning" class="banner banner-warn" role="status" hidden></p>
+    </section>
+
+    <!-- ============ C. SPEECH CONTROLS ============ -->
+    <section class="card card-player" aria-labelledby="playbackHeading">
+      <div class="card-head">
+        <h2 id="playbackHeading">Playback</h2>
+        <span class="status" id="statusChip">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="statusText" aria-live="polite">Ready</span>
+        </span>
+      </div>
+
+      <button id="playBtn" type="button" class="btn btn-play">
+        <span aria-hidden="true">&#9654;</span> Play
+      </button>
+
+      <div class="control-grid">
+        <button id="pauseBtn" type="button" class="btn btn-soft">Pause</button>
+        <button id="resumeBtn" type="button" class="btn btn-soft">Resume</button>
+        <button id="stopBtn" type="button" class="btn btn-soft">Stop</button>
+      </div>
+
+      <div class="field rate-field">
+        <label for="rateRange">Speed <span id="rateValue" class="rate-value">1.0&times;</span></label>
+        <input id="rateRange" type="range" min="0.7" max="1.3" step="0.1" value="1" />
+      </div>
+
+      <p class="hint">
+        Speed changes apply the next time you press Play. Pause and Resume support varies between
+        browsers &mdash; Stop always works.
+      </p>
+
+      <p id="errorMessage" class="banner banner-error" role="alert" hidden></p>
+    </section>
+
+    <!-- ============ D. AUDIO DOWNLOAD TEST ============ -->
+    <section class="card card-note" aria-labelledby="downloadHeading">
+      <div class="card-head">
+        <h2 id="downloadHeading">Audio Download Test</h2>
+        <span class="pill pill-muted">Not implemented</span>
+      </div>
+
+      <p>
+        The Web Speech API speaks straight to your device&rsquo;s audio output. It does
+        <strong>not</strong> return an MP3 file, an audio Blob, or any other downloadable audio object.
+      </p>
+
+      <ul class="note-list">
+        <li>
+          Browser speech synthesis output is not exposed as a capturable <code>MediaStream</code>,
+          so <code>MediaRecorder</code> cannot record it directly.
+        </li>
+        <li>
+          There is currently no free, offline, browser-only way to turn <code>speechSynthesis</code>
+          output into a real audio file.
+        </li>
+        <li>
+          For that reason this prototype deliberately ships <strong>no download button</strong>.
+          A button that produced an empty file or a text file renamed to <code>.mp3</code> would be
+          misleading.
+        </li>
+      </ul>
+
+      <p class="hint">
+        Recording and export will be added only after a browser-compatible approach has been verified.
+        Until then, playback happens live through your device speaker.
+      </p>
+    </section>
+
+  </main>
+
+  <footer class="app-footer">
+    <p>Runs entirely in your browser &middot; No accounts &middot; No uploads &middot; No downloads</p>
+  </footer>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
